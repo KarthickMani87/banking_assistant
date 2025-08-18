@@ -1,0 +1,5 @@
+# copy to .env and tweak
+WHISPER_MODEL=small.en
+WHISPER_COMPUTE_TYPE=float32
+CORS_ALLOW_ORIGINS=*
+

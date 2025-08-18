@@ -1,0 +1,13 @@
+services:
+  tts-backend:
+    build: .
+    container_name: tts-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+      - VOICE=en_US-lessac-low
+      - AUDIO_FORMAT=mp3
+    ports:
+      - "8001:8000"

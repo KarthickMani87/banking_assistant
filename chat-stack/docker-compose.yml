@@ -1,0 +1,89 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    environment:
+      - OLLAMA_NO_GPU=1
+      - OLLAMA_HOST=http://0.0.0.0:11434
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - banknet      
+
+  model-puller:
+    image: ollama/ollama:latest
+    container_name: ollama-model-puller
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - MODEL_NAME=qwen2.5:3b-instruct
+      - OLLAMA_HOST=http://ollama:11434
+      - SUMMARY_MODEL_NAME=qwen2.5:3b-instruct
+    volumes:
+      - ollama:/root/.ollama
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - |
+        set -e
+        echo "Waiting for $$OLLAMA_HOST …"
+        # Wait until the server responds to the CLI (no curl/wget needed)
+        until OLLAMA_HOST="$$OLLAMA_HOST" ollama list >/dev/null 2>&1; do sleep 1; done
+        echo "Pulling $$MODEL_NAME …"
+        OLLAMA_HOST="$$OLLAMA_HOST" ollama pull "$$MODEL_NAME"
+        echo "Pulling $$SUMMARY_MODEL_NAME"
+        OLLAMA_HOST="$$OLLAMA_HOST" ollama pull "$$SUMMARY_MODEL_NAME"
+        echo "Done."
+    restart: "no"
+    networks:
+      - banknet
+
+  llm-backend:
+    build: ./backend
+    container_name: llm-backend
+    restart: unless-stopped
+    environment:
+      - PGUSER=bankuser
+      - PGPASSWORD=bankpass
+      - PGDATABASE=bankdb
+      - PGHOST=bankdb    
+      - PGPORT=5432
+      - JWT_SECRET=supersecret    
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - MODEL_NAME=qwen2.5:3b-instruct
+      - TEMPERATURE=0.3
+      - NUM_CTX=4096
+      - RECENT_TURNS=8
+      - SUMMARY_MAX_CHARS=2000
+      - SUMMARY_MODEL_NAME=qwen2.5:3b-instruct
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+    depends_on:
+      ollama:
+        condition: service_healthy
+      model-puller:
+        condition: service_completed_successfully
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - banknet     # 👈 attach backend to your external network
+
+volumes:
+  ollama:
+
+networks:
+  banknet:
+    external: true
