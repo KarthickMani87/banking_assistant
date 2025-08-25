@@ -1,6 +1,6 @@
 import os
-from typing import Dict, Optional, List, TypedDict
-from fastapi import FastAPI, Request, Header, Depends, HTTPException, status
+from typing import Dict, Any, Optional, List, TypedDict
+from fastapi import FastAPI, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -13,13 +13,11 @@ from langchain.tools import tool
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer
 from jose import jwt, JWTError
 
-# ---------------- Security ----------------
-#SECRET_KEY = "supersecret"  # use env var in prod
-SECRET_KEY = os.getenv("JWT_SECRET", "supersecret")
-
+SECRET_KEY = "supersecret"  # use env var in prod
 ALGORITHM = "HS256"
 security = HTTPBearer()
 
@@ -30,20 +28,21 @@ def verify_jwt(token: str = Depends(security)):
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
+
 # ---------------- Config ----------------
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5:3b-instruct")
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0"))
 
 DB_CONFIG = {
-    "dbname": os.getenv("PGDATABASE"),
-    "user": os.getenv("PGUSER"),
-    "password": os.getenv("PGPASSWORD"),
-    "host": os.getenv("PGHOST"),
-    "port": os.getenv("PGPORT"),
+    "dbname": os.getenv("PGDATABASE", "bankdb"),
+    "user": os.getenv("PGUSER", "bankuser"),
+    "password": os.getenv("PGPASSWORD", "bankpass"),
+    "host": os.getenv("PGHOST", "localhost"),
+    "port": os.getenv("PGPORT", "5432"),
 }
 
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 
 app = FastAPI()
@@ -75,7 +74,9 @@ def get_balance(user_name: str) -> str:
 
 @tool
 def transfer_money(from_user: str, to_user: str, amount: float) -> str:
-    """Transfer money between two users atomically."""
+    """Transfer money between two users atomically. 
+    If the recipient does not exist, require confirmation to add them as beneficiary.
+    """
     with get_conn() as conn, conn.cursor() as cur:
         # get sender
         cur.execute("""
@@ -99,6 +100,7 @@ def transfer_money(from_user: str, to_user: str, amount: float) -> str:
             return f"Sender {from_user} not found."
 
         if not acc_to:
+            # Instead of auto-creating → ask user to confirm
             return (
                 f"Beneficiary '{to_user}' does not exist. "
                 f"Please confirm if you want to add {to_user} as a new beneficiary."
@@ -121,6 +123,7 @@ def transfer_money(from_user: str, to_user: str, amount: float) -> str:
         )
 
     return f"Transferred ${amount} from {from_user} to {to_user}. New balances: {from_user}={new_from}, {to_user}={new_to}"
+
 
 @tool
 def list_transactions(user_name: str, limit: int = 5) -> str:
@@ -147,12 +150,16 @@ def get_exchange_rate(base: str = "USD", target: str = "EUR") -> str:
     except Exception as e:
         return f"Error fetching rate: {e}"
 
+    print("Get Exchange Rate: ", resp)
     rates = resp.get("rates")
     if not rates:
         return f"API error: {resp}"
 
     rate = rates.get(target)
-    return f"1 {base} = {rate:.2f} {target}" if rate else f"Could not fetch rate for {base}->{target}"
+    if rate:
+        return f"1 {base} = {rate:.2f} {target}"
+    else:
+        return f"Could not fetch rate for {base}->{target}, response={resp}"
 
 @tool
 def get_exchange_rate_ddg(base: str = "USD", target: str = "EUR") -> str:
@@ -167,6 +174,7 @@ def get_exchange_rate_ddg(base: str = "USD", target: str = "EUR") -> str:
 def add_beneficiary(user_name: str) -> str:
     """Add a new user + account (beneficiary) with 0 balance."""
     with get_conn() as conn, conn.cursor() as cur:
+        # Check if already exists
         cur.execute("SELECT id FROM users WHERE name=%s", (user_name,))
         if cur.fetchone():
             return f"Beneficiary {user_name} already exists."
@@ -175,6 +183,10 @@ def add_beneficiary(user_name: str) -> str:
         new_user_id = cur.fetchone()["id"]
         cur.execute("INSERT INTO accounts (user_id, balance) VALUES (%s, %s)", (new_user_id, 0))
     return f"Beneficiary {user_name} has been added successfully."
+
+
+# Collect tools into a dict
+tools = {t.name: t for t in [get_balance, transfer_money, list_transactions, get_exchange_rate, get_exchange_rate_ddg, add_beneficiary]}
 
 # ---------------- LLM ----------------
 llm = ChatOllama(
@@ -193,6 +205,8 @@ class AgentState(TypedDict, total=False):
 # ---------------- Nodes ----------------
 def nlu_agent(state: AgentState):
     messages = state.get("messages", [])
+
+    print("Message received at NLU: ", messages)
     if not messages:
         return {"intent": "unknown", "messages": []}
         
@@ -200,19 +214,25 @@ def nlu_agent(state: AgentState):
     system = (
         "Classify the intent of the user query as one of: "
         "balance, transfer, transactions, exchange_rate, add_beneficiary, or conversation. "
-        "Reply with only the intent keyword."
+        "Reply with only the intent keyword. "
+        "If the user confirms adding a new person (e.g. 'yes, add Charlie'), classify as add_beneficiary."
     )
     resp = llm.invoke([
         {"role": "system", "content": system},
         {"role": "user", "content": user_msg}
     ])
+
+    print("Message Reply at NLU: ", resp.content.lower().strip())
     return {"intent": resp.content.lower().strip(), "messages": messages}
+
 
 def db_agent(state: AgentState):
     messages = state.get("messages", [])
     if not messages:
         return {"intent": "unknown", "messages": []}
-    intent = state.get("intent", "").lower()
+
+    intent = state.get("intent", "").lower()   # ✅ defined first
+
     if "balance" in intent:
         result = tools["get_balance"].invoke({"user_name": "Alice"})
     elif "transfer" in intent:
@@ -221,24 +241,27 @@ def db_agent(state: AgentState):
         result = tools["list_transactions"].invoke({"user_name": "Alice"})
     else:
         result = "I don't know how to handle that."
+    
     return {"db_result": result, "messages": messages}
 
 def reasoning_agent(state: AgentState):
+    messages = state.get("messages", [])
     db_result = state.get("db_result", "No DB result available.")
+    system = "Interpret DB or tool results for conversation."
     resp = llm.invoke([
-        {"role": "system", "content": "Interpret DB or tool results for conversation."},
+        {"role": "system", "content": system},
         {"role": "user", "content": str(db_result)}
     ])
-    return {"reasoned": resp.content, "messages": state.get("messages", [])}
+    return {"reasoned": resp.content, "messages": messages}
 
 def conversation_agent(state: AgentState):
     messages = state.get("messages", [])
     reasoned = state.get("reasoned", "No reasoning available.")
     system = (
-        "You are a friendly banking assistant. "
-        "Keep replies concise (≤60 words). "
-        "Answer only banking queries (balance, transfers, transactions, exchange rates). "
-        "If asked unrelated questions, politely decline."
+    "You are a friendly banking assistant. "
+    "Keep replies concise, clear, and natural, within 50–60 words. "
+    "Answer only banking-related queries (balance, transfers, transactions, exchange rates). "
+    "If asked unrelated questions, politely decline and remind the user that your purpose is banking assistance."
     )
     resp = llm.invoke([
         {"role": "system", "content": system},
@@ -247,38 +270,54 @@ def conversation_agent(state: AgentState):
     ])
     return {"messages": messages + [{"role": "assistant", "content": resp.content}]}
 
+
+    return {"messages": messages + [{"role": "assistant", "content": resp.content}]}
+
 def info_agent(state: AgentState):
+    messages = state.get("messages", [])
+    if not messages:
+        return {"db_result": "No user message.", "messages": []}
+
+    # for now hardcoded, later parse currencies from the user query
     result = tools["get_exchange_rate_ddg"].invoke({"base": "USD", "target": "EUR"})
-    return {"db_result": result, "messages": state.get("messages", [])}
+    
+    return {"db_result": result, "messages": messages}
 
 def beneficiary_agent(state: AgentState):
     messages = state.get("messages", [])
     user_msg = messages[-1]["content"]
+
+    # crude parsing: look for "add X" or "yes, add X"
     tokens = user_msg.strip().split()
     new_name = None
     if "add" in tokens:
         idx = tokens.index("add")
         if idx + 1 < len(tokens):
             new_name = tokens[idx + 1].capitalize()
+
     if not new_name:
         return {"db_result": "Couldn't identify the beneficiary's name. Please specify like 'add Charlie'.", "messages": messages}
+
     result = tools["add_beneficiary"].invoke({"user_name": new_name})
     return {"db_result": result, "messages": messages}
+
+
 
 def route_intent(state: AgentState) -> str:
     intent = state.get("intent", "unknown").lower()
     if "balance" in intent or "transfer" in intent or "transaction" in intent:
         return "db"
-    elif "beneficiary" in intent:
+    elif "beneficiary" in intent or "add beneficiary" in intent:
         return "beneficiary"    
     elif "exchange" in intent or "rate" in intent:
         return "info"
     else:
         return "conversation"
-
+    
 # ---------------- Build LangGraph ----------------
 workflow = StateGraph(AgentState)
 workflow.add_node("nlu", nlu_agent)
+#workflow.add_node("router", router)
 workflow.add_node("info", info_agent)
 workflow.add_node("db", db_agent)
 workflow.add_node("beneficiary", beneficiary_agent)
@@ -286,12 +325,19 @@ workflow.add_node("reasoning", reasoning_agent)
 workflow.add_node("conversation", conversation_agent)
 
 workflow.set_entry_point("nlu")
-workflow.add_conditional_edges("nlu", route_intent, {
-    "db": "db",
-    "info": "info",
-    "beneficiary": "beneficiary",
-    "conversation": "conversation"
-})
+#workflow.add_edge("nlu", "router")
+
+workflow.add_conditional_edges(
+    "nlu",             # source node
+    route_intent,      # function that decides next
+    {
+        "db": "db",
+        "info": "info",
+        "beneficiary": "beneficiary",
+        "conversation": "conversation"
+    }
+)
+
 workflow.add_edge("beneficiary", "reasoning")
 workflow.add_edge("db", "reasoning")
 workflow.add_edge("info", "reasoning")
@@ -309,16 +355,28 @@ class ChatOut(BaseModel):
     reply: str
     session_id: str
 
-# ---------------- Endpoints ----------------
+def verify_jwt(token: str = Depends(security)):
+    try:
+        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload  # contains user info
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    
+# ---------------- Endpoint ----------------
 @app.post("/chat", response_model=ChatOut)
+#async def chat(body: ChatIn, request: Request, x_session_id: Optional[str] = Header(default=None)):
 async def chat(body: ChatIn, request: Request, x_session_id: Optional[str] = Header(default=None), user=Depends(verify_jwt)):
     session_id = x_session_id or request.client.host or "default"
+    print("Input chat Message: ", body.message, "request", request)
     state = {"messages": [{"role": "user", "content": body.message}]}
+
+    #messages = state.get("messages", [])
+
+    #print("Input chat Message before invoke state: ", body.message)
+
     result = graph.invoke(state, config={"configurable": {"thread_id": session_id}}) or {}
     messages = result.get("messages", [])
     reply = messages[-1]["content"] if messages else "Sorry, I wasn't able to process that."
-    return ChatOut(reply=reply, session_id=session_id)
 
-@app.get("/healthz")
-def healthz():
-    return {"ok": True, "model": MODEL_NAME}
+
+    return ChatOut(reply=reply, session_id=session_id)

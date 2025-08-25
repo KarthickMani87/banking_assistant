@@ -205,6 +205,51 @@ usermod -a -G docker ec2-user
 curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 chmod +x /usr/local/bin/docker-compose
 
+  # 🔹 Install and configure Nginx
+  amazon-linux-extras install nginx1 -y
+  systemctl enable nginx
+  systemctl start nginx
+
+cat >/etc/nginx/conf.d/backend.conf <<'EOL'
+server {
+  listen 80;
+
+  location /voiceauth/ {
+    proxy_pass http://127.0.0.1:8002/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  location /stt/ {
+    proxy_pass http://127.0.0.1:8000/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  location /tts/ {
+    proxy_pass http://127.0.0.1:8001/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  location /llm/ {
+    proxy_pass http://127.0.0.1:5000/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+EOL
+
+nginx -t && systemctl restart nginx
+
 REGION=${var.region}
 ACCOUNT_ID=${var.account_id}
 BUCKET="${var.project_name}-${var.env}-${data.aws_caller_identity.current.account_id}-db"
@@ -266,52 +311,7 @@ done
   docker exec -i postgres psql -U bankuser -d bankdb -f /schema.sql
   docker exec -i postgres psql -U bankuser -d bankdb -f /seed.sql
 
-  # 🔹 Install and configure Nginx
-  amazon-linux-extras enable nginx1
-  yum clean metadata
-  yum install -y nginx
-  systemctl enable nginx
-  systemctl start nginx
 
-  cat <<'EOL' > /etc/nginx/conf.d/backend.conf
-  server {
-    listen 80;
-
-    location /voiceauth/ {
-      proxy_pass http://127.0.0.1:8002/;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /stt/ {
-      proxy_pass http://127.0.0.1:8000/;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /tts/ {
-      proxy_pass http://127.0.0.1:8001/;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /llm/ {
-      proxy_pass http://127.0.0.1:5000/;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-    }
-  }
-  EOL
-
-  nginx -t && systemctl restart nginx
   EOF
 
 

@@ -1,38 +1,35 @@
-variable "aws_region" {
-  type        = string
-  default     = "us-east-1"
-  description = "AWS region to deploy infra"
+variable "region" {
+  description = "AWS region"
+  default     = "ap-southeast-2"
 }
 
-variable "jwt_key" {
-  type        = string
-  description = "JWT signing secret"
-  sensitive   = true
+variable "instance_type" {
+  description = "EC2 instance type"
+  default     = "t3.large"
 }
 
-variable "voice_auth_secret" {
-  type        = string
-  description = "Secret used in voice authentication module"
-  sensitive   = true
+variable "key_name" {
+  description = "Name of the EC2 key pair"
+  default     = ""
 }
 
-variable "db_password" {
-  type        = string
-  description = "Password for Postgres DB"
-  default     = "bankpass" # matches what you used in base.tf
+variable "private_key_path" {
+  description = "Path to your private key (.pem)"
+  default     = ""
 }
 
-variable "frontend_bucket_name" {
-  description = "Name of the S3 bucket for the frontend"
+variable "project_name" {
+  description = "Name of the project/solution"
+  default     = "chatbot-frontend"
+}
+
+variable "env" {
+  description = "Deployment environment"
+  default     = "dev"
+}
+
+variable "account_id" {
+  description = "AWS Account ID where ECR repositories are located"
   type        = string
 }
 
-variable "iam_user_name" {
-  description = "IAM user name to attach policies to"
-  type        = string
-}
-
-variable "aws_account_id" {
-  description = "AWS Account ID where infra will be deployed"
-  type        = string
-}

@@ -18,7 +18,7 @@ enrolled_voices = {}  # {username: embedding_vector}
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
+    allow_origins=["*"],#os.getenv("CORS_ALLOW_ORIGINS", "*").split(","), #os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -69,7 +69,7 @@ async def voice_login(file: UploadFile = File(...)):
         if sim > best_score:
             best_user, best_score = username, sim
 
-    if best_score < 0.75:  # threshold
+    if best_score < 0.5:  # threshold
         raise HTTPException(401, f"Voice not recognized (score={best_score:.2f})")
 
     token = issue_jwt(best_user)

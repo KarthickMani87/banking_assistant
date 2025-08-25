@@ -1,27 +1,31 @@
-output "chat_url" {
-  value = "http://${aws_lb.main.dns_name}/chat"
+# ec2.tf remains the same as you pasted (with Nginx config at the bottom)
+
+###########################
+# outputs.tf
+###########################
+
+output "backend_urls" {
+  value = {
+    chatstack = "http://${aws_eip.backend_eip.public_ip}/llm"
+    stt       = "http://${aws_eip.backend_eip.public_ip}/stt"
+    tts       = "http://${aws_eip.backend_eip.public_ip}/tts"
+    voiceauth = "http://${aws_eip.backend_eip.public_ip}/voiceauth"
+  }
 }
 
-output "stt_url" {
-  value = "http://${aws_lb.main.dns_name}/stt"
+output "ssh_command" {
+  value = "ssh -i ${var.private_key_path} ec2-user@${aws_eip.backend_eip.public_ip}"
 }
 
-output "tts_url" {
-  value = "http://${aws_lb.main.dns_name}/tts"
+
+output "cloudfront_domain" {
+  value = aws_cloudfront_distribution.frontend.domain_name
 }
 
-output "voice_auth_url" {
-  value = "http://${aws_lb.main.dns_name}/voice-login"
+output "aws_region" {
+  value = var.region
 }
 
-output "rds_endpoint" {
-  value = aws_db_instance.banking.endpoint
-}
-
-output "frontend_url" {
-  value = "http://${aws_s3_bucket.frontend.bucket_regional_domain_name}"
-}
-
-output "whoami" {
-  value = data.aws_caller_identity.current.arn
+output "account_id" {
+  value = data.aws_caller_identity.current.account_id
 }

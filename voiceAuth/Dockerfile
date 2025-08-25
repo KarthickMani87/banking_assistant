@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code
 COPY voice_auth.py .
 
-EXPOSE 9000
+EXPOSE 8000
 
-CMD ["uvicorn", "voice_auth:app", "--host", "0.0.0.0", "--port", "9000"]
+CMD ["uvicorn", "voice_auth:app", "--host", "0.0.0.0", "--port", "8000"]
 
