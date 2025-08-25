@@ -1,0 +1,84 @@
+version: "3.9"
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    environment:
+      - OLLAMA_NO_GPU=1
+      - OLLAMA_HOST=http://0.0.0.0:11434
+      - MODEL_NAME=qwen2.5:3b-instruct
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - |
+        set -e
+        /bin/ollama serve &
+        echo "Waiting for Ollama..."
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        echo "Pulling $$MODEL_NAME..."
+        ollama pull "$$MODEL_NAME"
+        echo "Model ready."
+        wait
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - banknet
+
+  llm-backend:
+    image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/llm-backend:latest
+    container_name: llm-backend
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - MODEL_NAME=qwen2.5:3b-instruct
+      - TEMPERATURE=0.3
+    ports:
+      - "5000:5000"
+    networks:
+      - banknet
+
+  stt:
+    image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/stt:latest
+    container_name: stt-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - banknet
+
+  tts:
+    image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/tts:latest
+    container_name: tts-backend
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    networks:
+      - banknet
+
+  voiceauth:
+    image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/voiceauth:latest
+    container_name: voiceauth
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    networks:
+      - banknet
+
+volumes:
+  ollama:
+
+networks:
+  banknet:
+    driver: bridge
