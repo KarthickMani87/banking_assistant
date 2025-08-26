@@ -29,6 +29,9 @@ export default function App() {
   const [regBlob, setRegBlob] = useState(null);
   const [username, setUsername] = useState("");
 
+  // UI state toggle between login / register
+  const [showRegister, setShowRegister] = useState(false);
+
   const chatEndRef = useRef(null);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
@@ -43,12 +46,12 @@ export default function App() {
     });
   }, []);
 
-    // 👇 Add this effect to clear JWT on refresh
-    useEffect(() => {
-      localStorage.removeItem("jwt");
-      setJwt(null);
-      setAuthStatus("❌ Not logged in");
-    }, []);
+  // Clear JWT on refresh
+  useEffect(() => {
+    localStorage.removeItem("jwt");
+    setJwt(null);
+    setAuthStatus("❌ Not logged in");
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -130,6 +133,7 @@ export default function App() {
       setAuthStatus(`🎉 Successfully registered as ${username}`);
       setRegBlob(null);
       setUsername("");
+      setShowRegister(false); // 👈 auto-return to login
     } catch (err) {
       setAuthStatus(`❌ Registration failed: ${err.message}`);
     }
@@ -284,48 +288,64 @@ export default function App() {
 
   return (
     <div className="app">
-      {!jwt ? (
-        <>
-          {/* Registration Panel */}
-          <div className="register-panel">
-            <h2>📝 Voice Registration</h2>
-            <input
-              type="text"
-              placeholder="Enter username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-            <div style={{ marginTop: 10 }}>
-              <button
-                onClick={registering ? stopRegisterRecording : startRegisterRecording}
-                className={`reg-btn ${registering ? "recording" : ""}`}
-              >
-                {registering ? "⏹️ Stop Recording" : "🎙️ Record for Registration"}
-              </button>
-              {regBlob && (
-                <>
-                  <button onClick={playRegistration} style={{ marginLeft: 8 }}>▶️ Listen</button>
-                  <button onClick={confirmRegistration} style={{ marginLeft: 8 }}>✅ Confirm & Register</button>
-                </>
-              )}
-            </div>
-            <button onClick={deleteUser} style={{ marginTop: 10, color: "red" }}>
-              🗑️ Delete User
-            </button>
-          </div>
+      <div className="topbar">🏦 Banking Assistant</div>
 
-          {/* Login Panel */}
-          <div className="login-panel" style={{ marginTop: 30 }}>
-            <h2>🔐 Voice Login Required</h2>
-            <p>{authStatus}</p>
-            <button
-              onClick={loginRecording ? stopLoginRecording : startLoginRecording}
-              className={`login-btn ${loginRecording ? "recording" : ""}`}
-            >
-              {loginRecording ? "⏹️ Stop Recording" : "🎙️ Start Voice Login"}
-            </button>
-          </div>
-        </>
+      {!jwt ? (
+        <div className="auth-container">
+          {!showRegister ? (
+            /* Login Panel */
+            <div className="auth-panel">
+              <h2>🔐 Voice Login</h2>
+              <p>{authStatus}</p>
+              <button
+                onClick={loginRecording ? stopLoginRecording : startLoginRecording}
+                className={`login-btn ${loginRecording ? "recording" : ""}`}
+              >
+                {loginRecording ? "⏹️ Stop Recording" : "🎙️ Start Voice Login"}
+              </button>
+
+              <p className="switch-text">
+                Not registered?{" "}
+                <button className="link-btn" onClick={() => setShowRegister(true)}>
+                  Register here
+                </button>
+              </p>
+            </div>
+          ) : (
+            /* Registration Panel */
+            <div className="auth-panel">
+              <h2>📝 Voice Registration</h2>
+              <input
+                type="text"
+                placeholder="Enter username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+              <div style={{ marginTop: 10 }}>
+                <button
+                  onClick={registering ? stopRegisterRecording : startRegisterRecording}
+                  className={`login-btn ${registering ? "recording" : ""}`}
+                >
+                  {registering ? "⏹️ Stop Recording" : "🎙️ Record for Registration"}
+                </button>
+                {regBlob && (
+                  <>
+                    <button onClick={playRegistration} className="login-btn">▶️ Listen</button>
+                    <button onClick={confirmRegistration} className="login-btn">✅ Confirm & Register</button>
+                  </>
+                )}
+              </div>
+              <button onClick={deleteUser} className="delete-btn">🗑️ Delete User</button>
+
+              <p className="switch-text">
+                Already registered?{" "}
+                <button className="link-btn" onClick={() => setShowRegister(false)}>
+                  Back to Login
+                </button>
+              </p>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="chat-panel">
           <div className="chat-window">
@@ -357,12 +377,12 @@ export default function App() {
               placeholder="Type your message..."
               rows={1}
             />
-            <button type="submit" className="send-btn" title="Send">
+            <button type="submit" className="btn send" title="Send">
               <FaPaperPlane />
             </button>
             <button
               type="button"
-              className={`mic-btn ${recording ? "recording" : ""}`}
+              className={`btn mic ${recording ? "recording" : ""}`}
               onClick={recording ? stopRecording : startRecording}
               title={recording ? "Stop" : "Record"}
             >
